@@ -52,11 +52,11 @@ jobs:
           stats=$(python make_clouds.py gmgsi.png static_clouds4k.webp site)   # exits non-zero (nothing published) if the sanity checks fail
           echo "$stats"
           test -s site/clouds2k.webp && test -s site/clouds4k.webp
-          t=$(date -u +%Y-%m-%dT%H:%M:%SZ); v=$(date -u +%Y%m%d%H)
+          t=$(date -u +%Y-%m-%dT%H:00:00Z); v=$(date -u +%Y%m%d%H)   # the mosaic of this hour (GMGSI posts it about 40 min after the hour)
           printf '{"t":"%s","v":"%s","src":"NOAA GMGSI","f2k":"clouds2k.webp","f4k":"clouds4k.webp"}\n' "$t" "$v" > site/clouds.json
           cp index.html site/
           touch site/.nojekyll
-          echo "$t,$(echo "$stats" | tail -1 | cut -d' ' -f2-3 | tr ' ' ',')" >> log.csv
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ),$(echo "$stats" | tail -1 | cut -d' ' -f2-3 | tr ' ' ',')" >> log.csv
 
       - uses: actions/upload-pages-artifact@v5
         with:
