@@ -9,7 +9,7 @@ Every hour a GitHub Actions job takes the latest **NOAA GMGSI** (Global Mosaic o
 
 The mosaic covers about 72.7°S to 72.7°N. Beyond that, and wherever the mosaic has no data, the static NASA Blue Marble cloud map (`static_clouds4k.webp`) is blended in. Infrared shows cold cloud tops best: warm low cloud and fog show weakly, and cold snow or ice can look like thin cloud.
 
-`log.csv` records each run: time, share of valid pixels between 60°S and 60°N, mean cloud opacity.
+`log.csv` records each published mask: the mosaic's time, the run's time, share of valid pixels between 60°S and 60°N, mean cloud opacity. A run publishes nothing when the newest mosaic is already published or is more than 3 hours old.
 
 ## Sources and licences
 

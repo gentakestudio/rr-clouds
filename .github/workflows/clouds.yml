@@ -1,6 +1,6 @@
 name: Live clouds
 
-# Every hour: the latest NOAA GMGSI global infrared mosaic -> a cloud mask for the Roulette Radio globe, published on GitHub Pages.
+# Every hour: the newest NOAA GMGSI global infrared mosaic -> a cloud mask for the Roulette Radio globe, published on GitHub Pages.
 # GMGSI posts each hour's mosaic about 40-55 minutes after the hour, so the job runs at :50.
 on:
   schedule:
@@ -32,10 +32,20 @@ jobs:
 
       - run: pip install --quiet pillow numpy
 
-      - name: Fetch the NOAA GMGSI longwave infrared mosaic (nowCOAST WMS)
+      - name: Fetch the newest NOAA GMGSI longwave infrared mosaic (nowCOAST WMS)
+        id: fetch
         run: |
           set -euo pipefail
-          URL='https://nowcoast.noaa.gov/geoserver/observations/satellite/ows?service=WMS&request=GetMap&version=1.3.0&layers=global_longwave_imagery_mosaic&styles=&crs=CRS:84&bbox=-180,-90,180,90&width=4096&height=2048&format=image/png&transparent=true'
+          OWS='https://nowcoast.noaa.gov/geoserver/observations/satellite/ows'
+          # the mosaic's own time, so clouds.json says when the clouds were seen, and an old mosaic is never published as new
+          T=$(curl -sS --max-time 90 "$OWS?service=WMS&request=GetCapabilities&version=1.3.0" | python mosaic_time.py global_longwave_imagery_mosaic)
+          T0=$(date -u -d "$T" +%Y-%m-%dT%H:%M:%SZ)
+          age=$(( $(date -u +%s) - $(date -u -d "$T" +%s) ))
+          echo "newest mosaic: $T0 ($((age / 60)) min old)"
+          if [ "$age" -gt 10800 ]; then echo "older than 3 h: not publishing it (the page then falls back to its static clouds after 12 h)"; exit 1; fi
+          prev=$(curl -sS --max-time 30 "https://gentakestudio.github.io/rr-clouds/clouds.json" 2>/dev/null | python -c "import sys,json; print(json.load(sys.stdin).get('t',''))" 2>/dev/null || true)
+          if [ "$prev" = "$T0" ]; then echo "already published"; echo "new=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          URL="$OWS?service=WMS&request=GetMap&version=1.3.0&layers=global_longwave_imagery_mosaic&styles=&crs=CRS:84&bbox=-180,-90,180,90&width=4096&height=2048&format=image/png&transparent=true&time=$T"
           for i in 1 2 3 4; do
             # errors come back as HTTP 200 with an XML body, so the type and size are checked too
             if curl -sS --max-time 120 -D headers.txt -o gmgsi.png "$URL" \
@@ -44,28 +54,33 @@ jobs:
             echo "attempt $i failed"; rm -f gmgsi.png; sleep $((30 * i))
           done
           test -s gmgsi.png
+          { echo "new=true"; echo "t=$T0"; echo "v=$(date -u -d "$T" +%Y%m%d%H)"; } >> "$GITHUB_OUTPUT"
 
       - name: Build the cloud mask
+        if: steps.fetch.outputs.new == 'true'
+        id: build
         run: |
           set -euo pipefail
           mkdir -p site
           stats=$(python make_clouds.py gmgsi.png static_clouds4k.webp site)   # exits non-zero (nothing published) if the sanity checks fail
           echo "$stats"
           test -s site/clouds2k.webp && test -s site/clouds4k.webp
-          t=$(date -u +%Y-%m-%dT%H:00:00Z); v=$(date -u +%Y%m%d%H)   # the mosaic of this hour (GMGSI posts it about 40 min after the hour)
-          printf '{"t":"%s","v":"%s","src":"NOAA GMGSI","f2k":"clouds2k.webp","f4k":"clouds4k.webp"}\n' "$t" "$v" > site/clouds.json
+          printf '{"t":"%s","v":"%s","src":"NOAA GMGSI","f2k":"clouds2k.webp","f4k":"clouds4k.webp"}\n' "${{ steps.fetch.outputs.t }}" "${{ steps.fetch.outputs.v }}" > site/clouds.json
           cp index.html site/
           touch site/.nojekyll
-          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ),$(echo "$stats" | tail -1 | cut -d' ' -f2-3 | tr ' ' ',')" >> log.csv
+          echo "stats=$(echo "$stats" | tail -1 | cut -d' ' -f2-3 | tr ' ' ',')" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-pages-artifact@v5
+      - if: steps.fetch.outputs.new == 'true'
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
-      - id: deploy
+      - if: steps.fetch.outputs.new == 'true'
+        id: deploy
         uses: actions/deploy-pages@v5
 
       - name: Check the published files
+        if: steps.fetch.outputs.new == 'true'
         run: |
           set -euo pipefail
           base="${{ steps.deploy.outputs.page_url }}"
@@ -74,10 +89,14 @@ jobs:
           curl -sSf -o /dev/null "${base}clouds2k.webp"
 
       - name: Commit the run log
+        if: steps.fetch.outputs.new == 'true'
         run: |
           set -euo pipefail
-          tail -n 2000 log.csv > log.tmp && mv log.tmp log.csv
+          echo "${{ steps.fetch.outputs.t }},$(date -u +%Y-%m-%dT%H:%M:%SZ),${{ steps.build.outputs.stats }}" >> log.csv
+          { head -n 1 log.csv; tail -n +2 log.csv | tail -n 1999; } > log.tmp && mv log.tmp log.csv   # the header stays
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add log.csv
-          git commit -m "Clouds $(date -u +%Y-%m-%dT%H:%MZ)" && git push || echo "nothing to commit"
+          git commit -m "Clouds ${{ steps.fetch.outputs.t }}"
+          for i in 1 2 3; do git pull --rebase -q origin main && git push -q && exit 0; sleep 5; done
+          exit 1
