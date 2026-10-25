@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live clouds</title>
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;padding:24px 16px;background:#05070c;color:#d8dee9;font:15px/1.5 system-ui,sans-serif}
+  main{max-width:900px;margin:0 auto}
+  img{width:100%;height:auto;background:#000;border-radius:6px}
+  a{color:#8fc7ff}
+</style>
+</head>
+<body>
+<main>
+  <h1>Live clouds for the Roulette Radio globe</h1>
+  <p id="t">Hourly cloud mask from NOAA GMGSI infrared satellite imagery.</p>
+  <img src="clouds2k.webp" alt="Global cloud mask, white is cloud" width="2048" height="1024">
+  <p>Files: <a href="clouds.json">clouds.json</a>, <a href="clouds2k.webp">clouds2k.webp</a>, <a href="clouds4k.webp">clouds4k.webp</a>.
+     Data: NOAA/NESDIS GMGSI via nowCOAST; polar fill: NASA Blue Marble. Used by <a href="https://rouletteradio.com">rouletteradio.com</a>.</p>
+</main>
+<script>
+fetch("clouds.json",{cache:"no-cache"}).then(r=>r.json()).then(j=>{ document.getElementById("t").textContent="Latest: "+j.t+" (source "+j.src+")."; }).catch(()=>{});
+</script>
+</body>
+</html>

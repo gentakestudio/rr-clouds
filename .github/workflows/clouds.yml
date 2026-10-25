@@ -1,0 +1,83 @@
+name: Live clouds
+
+# Every hour: the latest NOAA GMGSI global infrared mosaic -> a cloud mask for the Roulette Radio globe, published on GitHub Pages.
+# GMGSI posts each hour's mosaic about 40-55 minutes after the hour, so the job runs at :50.
+on:
+  schedule:
+    - cron: "50 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write     # the run log (log.csv) is committed after each run
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  clouds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - run: pip install --quiet pillow numpy
+
+      - name: Fetch the NOAA GMGSI longwave infrared mosaic (nowCOAST WMS)
+        run: |
+          set -euo pipefail
+          URL='https://nowcoast.noaa.gov/geoserver/observations/satellite/ows?service=WMS&request=GetMap&version=1.3.0&layers=global_longwave_imagery_mosaic&styles=&crs=CRS:84&bbox=-180,-90,180,90&width=4096&height=2048&format=image/png&transparent=true'
+          for i in 1 2 3 4; do
+            # errors come back as HTTP 200 with an XML body, so the type and size are checked too
+            if curl -sS --max-time 120 -D headers.txt -o gmgsi.png "$URL" \
+               && grep -qi '^content-type: image/png' headers.txt \
+               && [ "$(stat -c%s gmgsi.png)" -gt 500000 ]; then break; fi
+            echo "attempt $i failed"; rm -f gmgsi.png; sleep $((30 * i))
+          done
+          test -s gmgsi.png
+
+      - name: Build the cloud mask
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          stats=$(python make_clouds.py gmgsi.png static_clouds4k.webp site)   # exits non-zero (nothing published) if the sanity checks fail
+          echo "$stats"
+          test -s site/clouds2k.webp && test -s site/clouds4k.webp
+          t=$(date -u +%Y-%m-%dT%H:%M:%SZ); v=$(date -u +%Y%m%d%H)
+          printf '{"t":"%s","v":"%s","src":"NOAA GMGSI","f2k":"clouds2k.webp","f4k":"clouds4k.webp"}\n' "$t" "$v" > site/clouds.json
+          cp index.html site/
+          touch site/.nojekyll
+          echo "$t,$(echo "$stats" | tail -1 | cut -d' ' -f2-3 | tr ' ' ',')" >> log.csv
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v5
+
+      - name: Check the published files
+        run: |
+          set -euo pipefail
+          base="${{ steps.deploy.outputs.page_url }}"
+          sleep 20
+          curl -sSf -o /dev/null "${base}clouds.json"
+          curl -sSf -o /dev/null "${base}clouds2k.webp"
+
+      - name: Commit the run log
+        run: |
+          set -euo pipefail
+          tail -n 2000 log.csv > log.tmp && mv log.tmp log.csv
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add log.csv
+          git commit -m "Clouds $(date -u +%Y-%m-%dT%H:%MZ)" && git push || echo "nothing to commit"
