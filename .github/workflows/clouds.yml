@@ -1,6 +1,7 @@
 name: Live clouds
 
-# Every hour: the newest NOAA GMGSI global infrared mosaic -> a cloud mask for the Roulette Radio globe, published on GitHub Pages.
+# Every hour: the newest NOAA GMGSI global infrared mosaic -> a cloud mask for the Roulette Radio globe, published on GitHub Pages,
+# with NOAA SWPC's aurora forecast as a small map beside it.
 # GMGSI posts each hour's mosaic about 40-55 minutes after the hour, so the job runs at :50.
 on:
   schedule:
@@ -65,7 +66,11 @@ jobs:
           stats=$(python make_clouds.py gmgsi.png static_clouds4k.webp site)   # exits non-zero (nothing published) if the sanity checks fail
           echo "$stats"
           test -s site/clouds2k.webp && test -s site/clouds4k.webp
-          printf '{"t":"%s","v":"%s","src":"NOAA GMGSI","f2k":"clouds2k.webp","f4k":"clouds4k.webp"}\n' "${{ steps.fetch.outputs.t }}" "${{ steps.fetch.outputs.v }}" > site/clouds.json
+          # the aurora forecast (NOAA SWPC OVATION) rides along; if it fails the clouds still go out, just without it
+          AT=""
+          if curl -sS --max-time 60 -o ovation.json https://services.swpc.noaa.gov/json/ovation_aurora_latest.json && A=$(python make_aurora.py ovation.json site); then echo "aurora: $A"; AT=$(echo "$A" | cut -d' ' -f2); else echo "aurora: skipped"; fi
+          if [ -n "$AT" ]; then AUR=",\"aurora\":\"aurora.webp\",\"at\":\"$AT\""; else AUR=""; fi
+          printf '{"t":"%s","v":"%s","src":"NOAA GMGSI","f2k":"clouds2k.webp","f4k":"clouds4k.webp"%s}\n' "${{ steps.fetch.outputs.t }}" "${{ steps.fetch.outputs.v }}" "$AUR" > site/clouds.json
           cp index.html site/
           touch site/.nojekyll
           echo "stats=$(echo "$stats" | tail -1 | cut -d' ' -f2-3 | tr ' ' ',')" >> "$GITHUB_OUTPUT"
