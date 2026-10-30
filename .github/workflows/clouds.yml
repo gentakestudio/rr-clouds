@@ -73,6 +73,15 @@ jobs:
           # NASA/JPL asteroid and comet flybys for "today in the sky" (sky.json); optional like the aurora
           D0=$(date -u -d '-2 day' +%Y-%m-%d)
           if curl -sS --max-time 60 -o cad_a.json "https://ssd-api.jpl.nasa.gov/cad.api?date-min=$D0&date-max=%2B14&dist-max=0.05&fullname=true&diameter=true" && curl -sS --max-time 60 -o cad_c.json "https://ssd-api.jpl.nasa.gov/cad.api?date-min=$D0&date-max=%2B30&dist-max=1&kind=c&fullname=true" && SK=$(python make_sky.py cad_a.json cad_c.json site); then echo "sky: $SK"; AUR="$AUR,\"sky\":\"sky.json\""; else echo "sky: skipped"; fi
+          # background radiation from Safecast for the Classic skin (rad.json); optional like the aurora. 30 archive cells are refreshed each run
+          B=https://gentakestudio.github.io/rr-clouds
+          if R=$(timeout 300 python make_rad.py site/rad.json 30); then echo "$R"; else echo "rad: skipped"; curl -sSf --max-time 60 -o site/rad.json "$B/rad.json" || rm -f site/rad.json; fi   # each deploy replaces the whole site, so the last file is carried over
+          # the real sun (NASA SDO/AIA 171) for the Emerald skin: six frames of the last ten hours. Optional like the aurora; if NASA has no good frames the last good picture is carried over the same way
+          if S=$(timeout 200 python make_sun.py site); then echo "sun: $S"; ST=$(echo "$S" | cut -d' ' -f2)
+          else echo "sun: skipped"; ST=$(curl -sS --max-time 30 "$B/clouds.json" 2>/dev/null | python -c "import sys,json; print(json.load(sys.stdin).get('sunT',''))" 2>/dev/null || true)
+            if [ -n "$ST" ] && ! curl -sSf --max-time 60 -o site/sun.webp "$B/sun.webp"; then ST=""; fi
+          fi
+          if [ -n "$ST" ]; then AUR="$AUR,\"sun\":\"sun.webp\",\"sunT\":\"$ST\""; fi
           printf '{"t":"%s","v":"%s","src":"NOAA GMGSI","f2k":"clouds2k.webp","f4k":"clouds4k.webp"%s}\n' "${{ steps.fetch.outputs.t }}" "${{ steps.fetch.outputs.v }}" "$AUR" > site/clouds.json
           cp index.html site/
           touch site/.nojekyll
@@ -104,7 +113,7 @@ jobs:
           { head -n 1 log.csv; tail -n +2 log.csv | tail -n 1999; } > log.tmp && mv log.tmp log.csv   # the header stays
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add log.csv
+          git add log.csv rad_grid.json rad_imports.json
           git commit -m "Clouds ${{ steps.fetch.outputs.t }}"
           for i in 1 2 3; do git pull --rebase -q origin main && git push -q && exit 0; sleep 5; done
           exit 1
