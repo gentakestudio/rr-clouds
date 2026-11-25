@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy2.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
 
@@ -93,15 +93,25 @@ jobs:
         with:
           path: site
 
+      # GitHub's own "Fetching artifact metadata failed" stopped 4 of 6 runs on 23.-25.11.2026, each time leaving the clouds
+      # 6-12 h old until the next run GitHub got round to; a second try a little later is let through
       - if: steps.fetch.outputs.new == 'true'
         id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+
+      - if: steps.fetch.outputs.new == 'true' && steps.deploy.outcome == 'failure'
+        run: sleep 90
+
+      - if: steps.fetch.outputs.new == 'true' && steps.deploy.outcome == 'failure'
+        id: deploy2
         uses: actions/deploy-pages@v5
 
       - name: Check the published files
         if: steps.fetch.outputs.new == 'true'
         run: |
           set -euo pipefail
-          base="${{ steps.deploy.outputs.page_url }}"
+          base="${{ steps.deploy.outputs.page_url || steps.deploy2.outputs.page_url }}"
           sleep 20
           curl -sSf -o /dev/null "${base}clouds.json"
           curl -sSf -o /dev/null "${base}clouds2k.webp"
